@@ -1,12 +1,16 @@
 from flask import Flask
-from flask_jwt_extended import JWTManager
+from flask_cors import CORS
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'bison'
+CORS(app)
 
-jwt = JWTManager(app)
 test_client = app.test_client()
 
-import api.views.red_flag_view
+import api.database.engine
 import api.views.user_view
+import api.views.red_flag_view
+import api.views.common_routes
 import api.views.intervention_view
+import api.models.user_model
+
+

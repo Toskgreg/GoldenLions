@@ -1,115 +1,47 @@
 import unittest
-import json
-from api import app, test_client
-from api.models.user_model import UserServices
+from tests.test_base import TestBase
+from api.models.user_model import User
+from api.database.engine import DbConnection
+
+base = TestBase()
 
 
 class TestUserView(unittest.TestCase):
 
     def setUp(self):
         """
-        Setup test client
+        Setup database connection
         """
-        self.test_client = test_client
-        self.user_services = UserServices()
-
-        user = {
-            'user_name': 'bison',
-            'email': 'bisonlou@gmail.com',
-            'date_registered': '2019-01-01',
-            'first_name': 'bison',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': 'Pa$$word123',
-            'other_names': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
-
-        self.user_id = message['data']['id']
+        self.db_services = DbConnection()
 
     def tearDown(self):
         """
-        teardown test client
+        teardown database
         """
-        self.user_services.remove_all()
+        self.db_services.reset_database()
+
+    def test_register_user_succesfuly(self):
+        """
+        Test registering a user succesfuly
+        """    
+        response = base.register_user()
+        self.assertEqual(response.status_code, 201)
 
     def test_register_user_with_blank_password(self):
         """
         Test registering a user without a password
         """
-        user = {
-            'user_name': 'bison',
-            'email': 'bisonlou@aol.com',
-            'date_registered': '2019-01-01',
-            'first_name': 'bison',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': '',
-            'other_names': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
+        data = {'password': ''}
+        response = base.register_user(data)
 
         self.assertEqual(response.status_code, 400)
-        self.assertDictContainsSubset(
-            {'length': 'Password should be between 6 and 12 characters'},
-            message['data'])
-
-    def test_register_user_with_missing_keys(self):
-        """
-        Test registering a user with missing email
-        """
-        user = {
-            'user_name': 'bison',
-            'date_registered': '2019-01-01',
-            'first_name': 'bison',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': '',
-            'other_names': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
-
-        self.assertEqual(response.status_code, 400)
-
+   
     def test_register_user_with_blank_firstname(self):
         """
         Test registering a user with a blank first name
         """
-        user = {
-            'user_name': 'bison',
-            'email': 'bisonlou@aol.com',
-            'date_registered': '2019-01-01',
-            'first_name': '',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': '',
-            'other_names': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
+        data = {'first_name': ''}
+        response = base.register_user(data)
 
         self.assertEqual(response.status_code, 400)
 
@@ -117,195 +49,82 @@ class TestUserView(unittest.TestCase):
         """
         Test registering a user with password longer than 12 characters
         """
-        user = {
-            'user_name': 'bison',
-            'email': 'bisonlou@aol.com',
-            'date_registered': '2019-01-01',
-            'first_name': 'bison',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': 'Pa$$word123456',
-            'other_names': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
+        data = {'password': 'Pa$$word123456'}
+        response = base.register_user(data)
 
         self.assertEqual(response.status_code, 400)
-        self.assertDictContainsSubset(
-            {'length': 'Password should be between 6 and 12 characters'},
-            message['data'])
 
-    def test_login(self):
+    def test_register_with_long_invalid_email(self):
         """
-        Test registering a user without a password
+        Test registering a user with an invalid email
         """
-        user = {
-            'email': 'bisonlou@gmail.com',
-            'password': 'Pa$$word123'
-        }
+        data = {'email': 'bisonlou.com'}
+        response = base.register_user(data)
 
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
+        self.assertEqual(response.status_code, 400)
+
+    def test_register_duplicate_user(self):
+        """
+        Test registering a user a second time
+        """
+        base.register_user()
+        response = base.register_user()
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_register_with_improper_type(self):
+        """
+        Test registering a user name 
+        """
+        data = {'user_name': 123}
+        response = base.register_user(data)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_get_user(self):
+        """
+        Test getting one user
+        """
+        credentials = {'email': 'bisonlou@ireporter.com',
+                       'password': 'Pa$$word123'}
+        token = base.get_token(credentials)
+        response = base.get_user(token)
 
         self.assertEqual(response.status_code, 200)
 
-    def test_login_with_missing_data(self):
+    def test_get_users_as_admin(self):
         """
-        Test loging in withou specifying a password
+        Test getting one user as admin
         """
-        user = {
-            'email': 'bisonlou@gmail.com'
-        }
+        credentials = {'email': 'bisonlou@gmail.com',
+                       'password': 'Pa$$word123'}
 
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        self.assertEqual(response.status_code, 400)
-
-    def test_login_with_empty_email(self):
-        """
-        Test login without email
-        """
-        user = {
-            'email': '',
-            'password': 'Pa$$word123'
-        }
-
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        self.assertEqual(response.status_code, 400)
-
-    def test_login_with_empty_password(self):
-        """
-        Test login with empty password
-        """
-        user = {
-            'email': 'bisonlou@gmail.com',
-            'password': ''
-        }
-
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        self.assertEqual(response.status_code, 400)
-
-    def test_login_with_wrong_password(self):
-        """
-        Test login with wrong password
-        """
-        user = {
-            'email': 'bisonlou@gmail.com',
-            'password': 'Password123'
-        }
-
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        self.assertEqual(response.status_code, 401)
-
-    def test_login_with_wrong_email(self):
-        """
-        Test login with wrongemail
-        """
-        user = {
-            'email': 'bisonlou@outlook.com',
-            'password': 'Pa$$word123'
-        }
-
-        response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        message = json.loads(response.data)
-
-        self.assertEqual(response.status_code, 401)
-
-    def test_get_all_users(self):
-        """
-        Test getting all users
-        """
-
-        user = {
-            'email': 'bisonlou@gmail.com',
-            'password': 'Pa$$word123'
-        }
-
-        login_response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(user))
-
-        token = json.loads(login_response.data)
-
-        response = self.test_client.get(
-            '/api/v1/users',
-            headers={'Authorization': 'Bearer ' +
-                     token['access_token']},
-            content_type='application/json'
-            )
-
-        message = json.loads(response.data)
+        token = base.get_token(credentials)
+        response = base.get_user(token)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(message['data'][0]['id'], self.user_id)
 
-    def test_get_all_users_as_non_administrator(self):
+    def test_get_users_as_admin(self):
         """
-        Test getting all users when not an administrator
-        Non admins should not be able to see other users but themselves
+        Test getting users as admin
         """
-        user = {
-            'user_name': 'bison',
-            'email': 'bisonlou@aol.com',
-            'date_registered': '2019-01-01',
-            'first_name': 'bison',
-            'last_name': 'lou',
-            'phone_number': '0753669897',
-            'password': 'Pa$$word123',
-            'other_names': ''
-        }
+        credentials = {'email': 'bisonlou@gmail.com',
+                       'password': 'Pa$$word123'}
 
-        response = self.test_client.post(
-            '/api/v1/register',
-            content_type='application/json',
-            data=json.dumps(user))
+        token = base.get_token(credentials)
+        response = base.get_users(token)
 
-        login_data = {
-            'email': 'bisonlou@aol.com',
-            'password': 'Pa$$word123'
-        }
+        self.assertEqual(response.status_code, 200)
 
-        login_response = self.test_client.post(
-            '/api/v1/login',
-            content_type='application/json',
-            data=json.dumps(login_data))
+    def test_get_users_as_non_admin(self):
+        """
+        Test getting users as non admin
+        """
+        credentials = {'email': 'bisonlou@ireporter.com',
+                       'password': 'Pa$$word123'}
 
-        token = json.loads(login_response.data)
-
-        response = self.test_client.get(
-            '/api/v1/users',
-            headers={'Authorization': 'Bearer ' +
-                     token['access_token']},
-            content_type='application/json'
-            )
-
-        message = json.loads(response.data)
+        token = base.get_token(credentials)
+        response = base.get_users(token)
 
         self.assertEqual(response.status_code, 403)
+    

@@ -1,86 +1,115 @@
-from api import app, jwt
+"""
+Module to handle incident CRUD operations
+"""
+import os
+from api import app
+import logging
+from datetime import datetime
+from api.models.user_model import User
+from werkzeug.utils import secure_filename
+from api.database.engine import DbConnection
+from api.models.incident_model import Incident
+from api.utility.authenticator import get_identity, verify_is_admin
+from api.validators.general_validator import(
+    validate_incident,
+    is_modifiable,
+    is_owner
+)
 from flask import Flask, request, json, jsonify, abort
-from flask_jwt_extended import get_jwt_identity
-from api.validators.Incident_Validator import ValidateIncident
-from api.models.incident_model import Incident, IncidentServices
-from api.models.user_model import User, UserServices
 
 
-incident_validator = ValidateIncident()
-incident_services = IncidentServices()
-user_services = UserServices()
+db_services = DbConnection()
 
 
 class IncidentController():
     '''
-
     Class to handle incident related routes
-
     '''
 
-    def create_incident(self, incident_type):
+    def create_incident(self):
         '''
         Function to create an incident
         Validates the incident data
         If data passes validation an incident is created
 
         '''
-        data = request.get_json()
-        user_id = get_jwt_identity()
+        incident_body = request.get_json()
+        user_id = get_identity()
 
-        data['created_by'] = user_id
-        data['status'] = 0
+        incident_body['createdby'] = user_id
+        incident_body['status'] = 'pending'
+        incident_body['createdon'] = datetime.utcnow().date()
 
-        if not incident_validator.has_required_keys(data):
-            abort(400)
+        errors = validate_incident(incident_body)
+        if errors:
+            return jsonify({'status': 400, 'errors': errors}), 400
 
-        incident_id = incident_services.get_next_id(incident_type)
+        incident_type = incident_body['type']
+        images = self.get_media(incident_body, 'images')
+        videos = self.get_media(incident_body, 'videos')
 
-        data['id'] = incident_id
-        new_incident = Incident(**data)
+        incident = Incident(**incident_body)
 
-        incident_services.create_incident(new_incident, incident_type)
+        self.add_incident_media(incident, images, 'images')
+        self.add_incident_media(incident, videos, 'videos')
+
+        incident_id = db_services.insert_incident(incident)
 
         success_response = {
             'id': incident_id,
             'message': 'Created {} record'.format(incident_type)
-            }
+        }
 
         return jsonify({'status': 201, 'data': [success_response]}), 201
 
     def get_incidents(self, incident_type):
         '''
         Function to retun all incident given an incident id
-
         '''
-        user_id = get_jwt_identity()
+        user_id = get_identity()
 
-        user = user_services.get_user_by_id(user_id)
+        incidents = db_services.get_all_incidents(user_id, incident_type)
 
-        incidents = incident_services.get_all(user_id, user.is_admin,
-                                              incident_type)
+        return jsonify({'status': 200, 'data': [incidents]})
 
-        return jsonify({'status': 200, 'data': incidents})
+    def get_totals(self):
+        '''
+        Function to retun all incident totals
+        '''
+        user_id = get_identity()
+        is_admin = verify_is_admin()
+        incident_totals = ""
 
-    def get_incident(self, incident_type, incident_id):
+        if is_admin is True:  
+            incident_totals = db_services.get_all_totals()
+        else:
+            incident_totals = db_services.get_user_totals(user_id)
+
+        return jsonify({'status': 200, 'data': incident_totals})
+
+
+    def get_incident(self, incident_id):
         '''
         Function to retun an incident give an incident id
         Validates the incident exists and belongs to this user
         If validation is passed an incident is returned
 
         '''
-        user_id = get_jwt_identity()
-        incident = incident_services.get_incident(
-                                incident_id, incident_type)
+        user_id = get_identity()        
+        incident = db_services.get_incident(incident_id)
+
         if not incident:
-            abort(404)
+            return jsonify({'status': 404, 'errors':
+                            'Incident does not exist'}), 404
 
-        if not incident_validator.is_owner(incident, user_id):
-            abort(403)
+        error = is_modifiable(incident, user_id)
+        if error:
+            return jsonify({'status': 403, 'errors': error}), 403
 
-        return jsonify({'status': 200, 'data': incident.to_dict()}), 200
 
-    def put_incident(self, incident_type, incident_id):
+        return jsonify({'status': 200, 'data': [incident.to_dict()]}), 200
+
+    def put_incident(self, incident_id):
         '''
         Function to update an entire incident
         Validates the incident exists and belongs to this user
@@ -89,41 +118,34 @@ class IncidentController():
 
         '''
         data = request.get_json()
-        user_id = get_jwt_identity()
+        user_id = get_identity()
 
         data['created_by'] = user_id
         data['id'] = incident_id
-        data['status'] = 0
 
-        if not incident_validator.has_required_keys(data):
-            abort(400)
+        errors = validate_incident(data)
+        if errors:
+            return jsonify({'status': 400, 'errors': errors}), 400
+
+        current_incident = db_services.get_incident(incident_id)
+        if current_incident is None:
+            return jsonify({'status': 404, 'errors':
+                            'incident not found'}), 404
+
+        error = is_modifiable(current_incident, user_id)
+        if error:
+            return jsonify({'status': 403, 'errors': error}), 403
 
         update_incident = Incident(**data)
 
-        existing_incident = incident_services.get_incident(
-                                incident_id, incident_type)
-        if not existing_incident:
-            abort(404)
+        updated_incident = db_services.put_incident(update_incident)
 
-        if not incident_validator.is_owner(existing_incident, user_id):
-            abort(403)
-
-        if not incident_validator.is_modifiable(existing_incident):
-            abort(403)
-
-        incident_services.put_incident(
-            existing_incident, update_incident, incident_type)
-
-        updated_incident = incident_services.get_incident(
-                            incident_id, incident_type)
-
-        return jsonify(
-            {
-                'status': 200,
-                'data': updated_incident.to_dict()
+        return jsonify({
+            'status': 200,
+            'data': [updated_incident.to_dict()]
             })
 
-    def patch_incident(self, incident_type, incident_id, update_key):
+    def patch_incident(self, incident_id, update_key):
         '''
         Function to update a property of an incident
         Validates the incident exists and belongs to this user
@@ -132,39 +154,75 @@ class IncidentController():
 
         '''
         data = request.get_json()
-        user_id = get_jwt_identity()
+        user_id = get_identity()
 
         data['created_by'] = user_id
         data['id'] = incident_id
 
-        if not incident_validator.has_required_keys(data):
-            abort(400)
+        errors = validate_incident(data)
+        if errors:
+            return jsonify({'status': 400, 'errors': errors}), 400
 
-        existing_incident = incident_services.get_incident(
-                            incident_id, incident_type)
+        existing_incident = db_services.get_incident(incident_id)
+
         if not existing_incident:
-            abort(404)
+            return jsonify({'status': 404, 'errors':
+                            'incident not found'}), 404
 
-        if not incident_validator.is_owner(existing_incident, user_id):
-            abort(403)
+        incident_type = existing_incident.type
 
-        if not incident_validator.is_modifiable(existing_incident):
-            abort(403)
+        errors = is_modifiable(existing_incident, user_id)
+        if errors:
+            return jsonify({'status': 403, 'error': errors}), 403
 
-        data['status'] = existing_incident.status
         update_incident = Incident(**data)
 
-        incident_services.patch_incident(existing_incident,
-                                         update_incident, update_key)
+        incident = db_services.patch_incident(
+            update_incident, update_key)
         success_response = {
             'id': incident_id,
             'message':
             'Updated {} record’s {}'.format(incident_type, update_key)
         }
 
-        return jsonify({'status': 200, 'data': success_response}), 200
+        return jsonify({'status': 200, 'data': [success_response]}), 200
 
-    def delete_incident(self, incident_type, incident_id):
+    def patch_incident_image(self, incident_id):
+        user_id = get_identity()      
+        # APP_ROOT = os.path.dirname(os.path.abspath('api/'))
+        upload_folder = os.environ['UPLOAD_FOLDER']
+
+        incident = db_services.get_incident(incident_id)
+        if not incident:
+            return jsonify({'status': 404, 'errors':
+                            'incident not found'}), 404
+
+        errors = is_modifiable(incident, user_id)
+        if errors:
+            return jsonify({'status': 403, 'error': errors}), 403
+
+        incident_type = incident.type
+
+        image = request.files.get('image', '')
+        if image.filename == '':
+            return jsonify({'status': 400, 'errors':
+                        ['image name cannot be empty']}), 400
+
+        filename = secure_filename(image.filename)
+        image.save(os.path.join(upload_folder, filename))
+        logging.debug(upload_folder)
+        db_services.add_incident_image(incident_id, filename)
+            
+        success_response = {
+            'id': incident_id,
+            'message':
+            'Image added to {} record'.format(incident_type)
+            }
+
+        return jsonify({'status': 201, 'data': [success_response]}), 201
+
+
+    def delete_incident(self, incident_id):
         '''
         Function to delete an incident
         Validates the incident exists and belongs to this user
@@ -173,77 +231,46 @@ class IncidentController():
         and a success message is returned
 
         '''
-        user_id = get_jwt_identity()
+        user_id = get_identity()
 
-        user = user_services.get_user_by_id(user_id)
+        user = db_services.get_user_by_id(user_id)
         if not user:
-            abort(401)
+            return jsonify({'status': 401, 'errors':
+                            'You are not authenticated'}), 401
 
-        existing_incident = incident_services.get_incident(
-                            incident_id, incident_type)
-        if not existing_incident:
-            abort(404)
+        existing_incident = db_services.get_incident(incident_id)
 
-        if not incident_validator.is_owner(existing_incident, user_id):
-            abort(403)
+        if existing_incident is None:
+            return jsonify({'status': 404, 'error':
+                            'Incident doesnt exist'}), 404
 
-        # check is user is an admin and whether the incident is modifiable
-        if not user.is_admin or not incident_validator.is_modifiable(
-                                existing_incident):
-            abort(403)
+        errors = is_modifiable(existing_incident, user_id)
+        if errors:
+            return jsonify({'status': 403, 'error': errors}), 403
 
-        incident_services.delete_incident(existing_incident, incident_type)
+        incident_type = existing_incident.type
+
+        deleted_id = db_services.delete_incident(existing_incident.id)
+        if deleted_id is None:
+            return jsonify({'status': 404, 'error':
+                            'Incident doesnt exist'}), 404
 
         success_response = {
-            'id': incident_id,
+            'id': deleted_id,
             'message':
             '{} record has been deleted'.format(incident_type)
         }
 
         return jsonify({'status': 200, 'data': success_response}), 200
 
-    def escalate_incident(self, incident_type, incident_id):
-        '''
-        Function to change the status of an incident
-        Validates the incident exists and the user is an admin
-        If validation is passed the incident is escalated
-        and a success message is returned
+    def get_media(self, incident, media_type):
+        if media_type in incident:
+            return incident[media_type]
 
-        '''
-        user_id = get_jwt_identity()
-
-        user = user_services.get_user_by_id(user_id)
-        if not user:
-            abort(401)
-
-        if user.is_admin is False:
-            abort(403)
-
-        existing_incident = incident_services.get_incident(
-                            incident_id, incident_type)
-        if not existing_incident:
-            abort(404)
-
-        incident_services.escalate_incident(existing_incident)
-        success_response = {
-            'id': incident_id,
-            'message': '{} record has been escalated'.format(incident_type)
-        }
-
-        return jsonify({'status': 200, 'data': success_response}), 200
-
-    @app.errorhandler(400)
-    def bad_request(error):
-        return jsonify({'status': 400, 'error': 'Bad Request'}), 400
-
-    @app.errorhandler(401)
-    def unauthorised(error):
-        return jsonify({'status': 401, 'error': 'Unauthorised'}), 401
-
-    @app.errorhandler(403)
-    def forbiden(error):
-        return jsonify({'status': 403, 'error': 'Forbidden'}), 403
-
-    @app.errorhandler(404)
-    def not_found(error):
-        return jsonify({'status': 404, 'error': 'Not Found'}), 404
+    def add_incident_media(self, incident, media_list, media_type):
+        if media_list:
+            for media in media_list:
+                if media_type == 'images':
+                    incident.add_image(media)
+                elif media_type == 'videos':
+                    incident.add_video(media)
