@@ -11,7 +11,7 @@ incident_type = 'red-flag'
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({
-        'greeting': 'Welcome to iReporter',
+        'greeting': 'Welcome to GoldenLionReporter',
         'post incident': '/api/v1/redflags',
         'get incidents': '/api/v1/redflags',
         'get incident': '/api/v1/redflags/flag_id',
