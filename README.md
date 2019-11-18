@@ -3,9 +3,6 @@
 ##### A web api to aid government and citizens reduce corruption, and holding leaders and representatives honest and efficient.
 
 
-Installation
-------------
-To access the api, browse to https://knightedge.herokuapp.com/ using postman
 
 Technology
 -------------
@@ -71,17 +68,12 @@ End Points
 
 
 
-
-**Contributers**
-----------------
-Innocent Lou <bisonlou@gmail.com>
-
 How to Contribute
 -----------------
 ```
 1.  Check for open issues or open a fresh issue to start a discussion
     around a feature idea or a bug.
-2.  Clone [the repository](https://github.com/bisonlou/ireporter.git) on
+2.  Clone [the repository](https://github.com/toskgreg/goldenlions.git) on
     GitHub to start making your changes to the **deploy** branch (or
     branch off of it).
 3.  Write a test which shows that the bug was fixed or that the feature
